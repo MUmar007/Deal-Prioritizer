@@ -1,0 +1,63 @@
+# Render blueprint, see https://render.com/docs/blueprint-spec
+#
+# Service URLs come from the names below. If Render gives you different ones
+# (names are first come, first served), fix VITE_API_URL and CORS_ORIGINS and
+# redeploy.
+
+services:
+  - type: web
+    name: deal-prioritizer-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: deal-prioritizer-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: deal-prioritizer-cache
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: '["https://deal-prioritizer-web.onrender.com"]'
+      - key: NOMINATIM_UA
+        sync: false
+
+  - type: web
+    name: deal-prioritizer-web
+    runtime: static
+    buildCommand: cd web && npm ci && npm run build
+    staticPublishPath: web/dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://deal-prioritizer-api.onrender.com
+      - key: NODE_VERSION
+        value: "22"
+    headers:
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  - type: keyvalue
+    name: deal-prioritizer-cache
+    plan: free
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
+databases:
+  - name: deal-prioritizer-db
+    plan: free
+    region: oregon
+    databaseName: dealprioritizer
+    user: deal
+    postgresMajorVersion: "16"

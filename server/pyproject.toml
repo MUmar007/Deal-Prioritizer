@@ -1,0 +1,36 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle (PEP 8)
+    "F",       # pyflakes
+    "I",       # isort
+    "N",       # PEP 8 naming
+    "D",       # docstring style (PEP 257)
+    "UP",      # pyupgrade
+    "B",       # bugbear
+    "BLE",     # catch specific exceptions, not bare Exception
+    "DTZ",     # no naive datetimes
+    "SIM",
+    "C4",
+    "ASYNC",
+    "RUF",
+]
+# Docstrings aren't required everywhere, but the ones we write follow PEP 257.
+ignore = ["D1"]
+allowed-confusables = ["·"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D"]
+"alembic/*" = ["D"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
