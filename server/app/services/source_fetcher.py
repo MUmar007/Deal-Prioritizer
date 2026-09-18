@@ -13,11 +13,6 @@ from app.services.rank_engine import CompanyCandidate, dedupe_hash
 
 logger = logging.getLogger(__name__)
 
-GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-OVERPASS_RETRY_STATUS = {429, 502, 503, 504}
-OVERPASS_RETRY_SECONDS = 2.0
-CACHE_VERSION = "v2"
 YEAR = re.compile(r"\b(1[89]\d{2}|20\d{2})\b")
 
 VERTICAL_TAGS = {
@@ -41,12 +36,14 @@ class MarketNotFoundError(Exception):
 class DiscoveryResult:
     """Candidates plus where they came from.
 
-    When source_status is "unavailable", Overpass didn't answer and the
-    candidates are sample rows, not real companies.
+    When source_status is "unavailable", neither Overpass nor the Nominatim
+    fallback answered and the candidates are sample rows, not real companies.
+    source_detail says what went wrong, if anything did.
     """
 
     candidates: list[CompanyCandidate]
     source_status: SourceStatus
+    source_detail: str | None = None
 
 
 def _tag_for_vertical(vertical: str) -> str:
@@ -114,7 +111,7 @@ async def resolve_market(market: str) -> tuple[float, float] | None:
     async with httpx.AsyncClient(
         timeout=settings.http_timeout, headers=headers
     ) as client:
-        res = await client.get(GEOCODE_URL, params=params)
+        res = await client.get(settings.geocode_url, params=params)
         res.raise_for_status()
         rows = res.json()
     if not rows:
@@ -168,30 +165,97 @@ def sample_companies(vertical: str, market: str) -> list[CompanyCandidate]:
     return out
 
 
-async def _query_overpass(query: str) -> list[dict] | None:
-    """Run an Overpass query. Returns None if Overpass didn't answer.
+def _describe(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    return str(exc) or type(exc).__name__
+
+
+async def _query_overpass(query: str) -> tuple[list[dict] | None, str]:
+    """Run an Overpass query. Returns (elements, "") or (None, reason).
 
     The public instance throws 429s and 504s under load, so a busy response
     gets one retry after a short pause.
     """
     headers = {"User-Agent": settings.nominatim_ua}
+    timeout = httpx.Timeout(25.0, connect=10.0)
     for attempt in range(2):
         try:
-            async with httpx.AsyncClient(timeout=25.0, headers=headers) as client:
-                resp = await client.post(OVERPASS_URL, data={"data": query})
+            async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
+                resp = await client.post(settings.overpass_url, data={"data": query})
                 resp.raise_for_status()
-                return resp.json().get("elements", [])
+                return resp.json().get("elements", []), ""
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             logger.warning("Overpass returned %s (attempt %d)", status, attempt + 1)
-            if attempt == 0 and status in OVERPASS_RETRY_STATUS:
-                await asyncio.sleep(OVERPASS_RETRY_SECONDS)
+            if attempt == 0 and status in settings.overpass_retry_status:
+                await asyncio.sleep(settings.overpass_retry_seconds)
                 continue
-            return None
+            return None, f"Overpass: {_describe(exc)}"
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("Overpass query failed: %s", exc)
-            return None
-    return None
+            return None, f"Overpass: {_describe(exc)}"
+    return None, "Overpass: no answer"
+
+
+def nominatim_tag(overpass_filter: str) -> str | None:
+    """Turn "[craft=plumber]" into "craft=plumber".
+
+    Returns None for filters Nominatim's search can't express, like the
+    name regex used for cleaning companies.
+    """
+    match = re.fullmatch(r"\[(\w+)=(\w+)\]", overpass_filter)
+    return f"{match.group(1)}={match.group(2)}" if match else None
+
+
+def tags_from_nominatim(row: dict) -> dict[str, str]:
+    """Reshape a Nominatim search result into the OSM tags Overpass would return."""
+    address = row.get("address") or {}
+    iso_state = address.get("ISO3166-2-lvl4", "")
+    tags = {
+        **(row.get("extratags") or {}),
+        "name": row.get("name") or "",
+        "addr:housenumber": address.get("house_number", ""),
+        "addr:street": address.get("road", ""),
+        "addr:city": address.get("city")
+        or address.get("town")
+        or address.get("village")
+        or "",
+        "addr:state": iso_state.removeprefix("US-"),
+    }
+    return {k: v for k, v in tags.items() if v}
+
+
+async def _search_nominatim(
+    tag: str, market: str, cap: int
+) -> tuple[list[dict] | None, str]:
+    """Fallback listing search for when Overpass can't be reached.
+
+    overpass-api.de blocks some cloud IP ranges (Render's among them), while
+    Nominatim still answers. It returns fewer results (40 max) but the same OSM
+    data, tags included. Returns (elements, "") or (None, reason).
+    """
+    await asyncio.sleep(settings.nominatim_pause_seconds)
+    params = {
+        "q": f"[{tag}] {market}",
+        "format": "jsonv2",
+        "limit": min(cap, settings.nominatim_max_results),
+        "extratags": 1,
+        "addressdetails": 1,
+        "countrycodes": "us",
+    }
+    headers = {"User-Agent": settings.nominatim_ua}
+    try:
+        async with httpx.AsyncClient(
+            timeout=settings.http_timeout, headers=headers
+        ) as client:
+            resp = await client.get(settings.geocode_url, params=params)
+            resp.raise_for_status()
+            rows = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Nominatim search failed: %s", exc)
+        return None, f"Nominatim: {_describe(exc)}"
+    return [{"tags": tags_from_nominatim(row)} for row in rows], ""
 
 
 async def pull_from_osm(vertical: str, market: str, cap: int) -> DiscoveryResult:
@@ -201,7 +265,7 @@ async def pull_from_osm(vertical: str, market: str, cap: int) -> DiscoveryResult
     the geocoder is down. Samples are never cached, otherwise a single bad
     minute on Overpass would stick around for the whole cache TTL.
     """
-    ck = f"osm:{CACHE_VERSION}:{vertical.lower()}:{market.lower()}:{cap}"
+    ck = f"osm:{settings.cache_version}:{vertical.lower()}:{market.lower()}:{cap}"
     cached = await get_cached(ck)
     if cached is not None:
         rows = [CompanyCandidate(**row) for row in cached]
@@ -222,9 +286,14 @@ async def pull_from_osm(vertical: str, market: str, cap: int) -> DiscoveryResult
     );
     out center tags {cap};
     """
-    elements = await _query_overpass(query)
+    elements, detail = await _query_overpass(query)
+    fallback_tag = nominatim_tag(tag)
+    if elements is None and fallback_tag:
+        elements, fallback_detail = await _search_nominatim(fallback_tag, market, cap)
+        detail = f"{detail}; " + (fallback_detail or "used Nominatim search instead")
     if elements is None:
-        return DiscoveryResult(sample_companies(vertical, market), "unavailable")
+        samples = sample_companies(vertical, market)
+        return DiscoveryResult(samples, "unavailable", detail)
 
     found: list[CompanyCandidate] = []
     seen = set()
@@ -241,4 +310,4 @@ async def pull_from_osm(vertical: str, market: str, cap: int) -> DiscoveryResult
 
     found = found[:cap]
     await put_cached(ck, [asdict(c) for c in found], settings.cache_seconds)
-    return DiscoveryResult(found, "live" if found else "no_results")
+    return DiscoveryResult(found, "live" if found else "no_results", detail or None)

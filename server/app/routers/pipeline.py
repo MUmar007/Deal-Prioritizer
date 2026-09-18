@@ -100,6 +100,7 @@ async def create_run(payload: RunCreate, session: SessionDep) -> RunOut:
         headcount_min=payload.headcount_min,
         headcount_max=payload.headcount_max,
         source_status=discovery.source_status,
+        source_detail=(discovery.source_detail or "")[:300] or None,
     )
     run.targets = _build_targets(discovery.candidates)
     session.add(run)

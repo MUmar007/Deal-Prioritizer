@@ -1,6 +1,6 @@
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,18 @@ class Settings(BaseSettings):
     http_timeout: float
     nominatim_ua: str
     cors_origins: list[str]
+
+    # External services and how politely we call them
+    geocode_url: str
+    overpass_url: str
+    overpass_retry_status: set[int]
+    overpass_retry_seconds: float = Field(ge=0)
+    # Nominatim's usage policy allows at most one request per second.
+    nominatim_pause_seconds: float = Field(ge=0)
+    # Nominatim won't return more than 40 results per search.
+    nominatim_max_results: int = Field(ge=1, le=40)
+    # Bump to invalidate cached discovery results after changing their shape.
+    cache_version: str
 
     @field_validator("redis_url", mode="before")
     @classmethod

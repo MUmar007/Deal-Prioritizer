@@ -9,10 +9,10 @@ Search funds and small PE shops pull long lead lists out of tools like SaaSquatc
 ## Features
 
 - Search by vertical and market (with an optional headcount band, see below)
-- Live business data from OpenStreetMap via Nominatim and Overpass
+- Live business data from OpenStreetMap via Overpass, with Nominatim's category search as a fallback when Overpass can't be reached
 - Chains and franchises filtered out using OSM's `brand:wikidata` tags plus a list of known brand names
 - 0–100 fit score and tier (prime / solid / watch / reject), based only on what the listing says
-- If OpenStreetMap is down, you get sample rows marked as such; they're never cached or exported
+- If both are down, you get sample rows marked as such, with the reason; they're never cached or exported
 - CSV export that matches whatever the filters show on screen
 - Swagger docs at `/docs`
 
@@ -156,7 +156,7 @@ flowchart LR
     A <-->|runs + targets| P[(PostgreSQL)]
 ```
 
-A search is a single request. The API geocodes the market with Nominatim, asks Overpass for matching businesses within about 10 km, drops duplicates, rejects chains, scores what's left and saves the run. After that the UI filters the saved results in the browser, and the CSV export goes back through the API.
+A search is a single request. The API geocodes the market with Nominatim, asks Overpass for matching businesses within about 10 km (or Nominatim's category search if Overpass can't be reached), drops duplicates, rejects chains, scores what's left and saves the run. After that the UI filters the saved results in the browser, and the CSV export goes back through the API.
 
 ### Data storage
 
@@ -172,7 +172,7 @@ PostgreSQL 16 through SQLAlchemy 2.0 (async, asyncpg), with Alembic for migratio
 - Geocodes and discovery results go in Redis for an hour (`CACHE_SECONDS`), or in process memory if Redis isn't configured. A repeat search goes from roughly 13 s to 0.04 s. Keys are versioned, and only live OSM results get cached.
 - Everything on the request path is async (FastAPI, httpx, asyncpg, redis.asyncio), so one slow Overpass call doesn't hold up other requests.
 - DB connections are pooled with pre-ping, and a run's companies load in one extra query rather than one per row.
-- Overpass gets one retry after 2 s when it answers 429 or 5xx. If the geocoder is down the API returns a 503.
+- Overpass gets one retry after 2 s when it answers 429 or 5xx. If it can't be reached at all, the API falls back to Nominatim's search for the same OSM tag (e.g. `[craft=plumber] Denver, CO`). That matters in production: overpass-api.de blocks some cloud IP ranges, including Render's, while Nominatim still answers. The fallback returns up to 40 results instead of Overpass's larger area search. If the geocoder is down the API returns a 503.
 - Hashed JS and CSS bundles get a one-year browser cache, while `index.html` is always revalidated so a refresh picks up new builds. Filtering happens in the browser, so no round trips.
 
 ### Hosting and deployment
@@ -222,6 +222,8 @@ All API settings come from the environment and none have defaults in code, so th
 - Render: `render.yaml` sets them, except `NOMINATIM_UA`, which you enter when creating the blueprint.
 - Tests: `tests/conftest.py` sets its own, pointing at the test database.
 
+Changing any of these on Render (for example switching `OVERPASS_URL` to another instance) only needs an edit in the dashboard and a restart, not a code change.
+
 | Variable | Example | Purpose |
 |----------|---------|---------|
 | `DATABASE_URL` | `postgresql+asyncpg://deal:deal@localhost:5433/dealprioritizer` | PostgreSQL connection. Plain `postgres://` URLs from Render or Neon work too |
@@ -230,6 +232,13 @@ All API settings come from the environment and none have defaults in code, so th
 | `HTTP_TIMEOUT` | `15` | Geocoder timeout, seconds |
 | `NOMINATIM_UA` | `DealPrioritizer/1.0 (+https://github.com/<you>/<repo>)` | User-Agent for OSM services. Use a real contact; Overpass rejects `example.com` |
 | `CORS_ORIGINS` | `["http://localhost:3000"]` | JSON list of browser origins allowed to call the API |
+| `GEOCODE_URL` | `https://nominatim.openstreetmap.org/search` | Nominatim search endpoint, for geocoding and the fallback listing search |
+| `OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | Overpass endpoint for business listings |
+| `OVERPASS_RETRY_STATUS` | `[429,502,503,504]` | JSON list of Overpass statuses that mean "busy, retry once" |
+| `OVERPASS_RETRY_SECONDS` | `2` | Wait before that retry |
+| `NOMINATIM_PAUSE_SECONDS` | `1` | Wait before the fallback search (Nominatim allows 1 request/s) |
+| `NOMINATIM_MAX_RESULTS` | `40` | Fallback result cap, 1–40 (Nominatim's own maximum is 40) |
+| `CACHE_VERSION` | `v2` | Part of every discovery cache key; bump it to drop cached results |
 
 The container's port is separate: it listens on `PORT` if set (Render sets it), otherwise 8000.
 
@@ -269,7 +278,7 @@ alembic upgrade head
 | GET | `/v1/pipeline/runs/{id}` | Get a saved run |
 | GET | `/v1/pipeline/runs/{id}/export?min_score=0&include_rejects=false` | CSV download (same filters as the UI) |
 
-Bad input or an unknown market comes back as a 422 with FastAPI's `detail`. If the geocoder is down you get a 503. If Overpass is still busy after the retry, the run comes back with `source_status: "unavailable"` and sample companies. Every company has `source: "osm" | "sample"`, and samples are never exported.
+Bad input or an unknown market comes back as a 422 with FastAPI's `detail`. If the geocoder is down you get a 503. If neither Overpass nor the Nominatim fallback answers, the run comes back with `source_status: "unavailable"` and sample companies. `source_detail` says what went wrong (or that the fallback was used). Every company has `source: "osm" | "sample"`, and samples are never exported.
 
 ## Stack
 
@@ -290,7 +299,7 @@ Bad input or an unknown market comes back as a 422 with FastAPI's `detail`. If t
 
 - Listings come from [OpenStreetMap](https://www.openstreetmap.org/copyright) through Nominatim and Overpass. © OpenStreetMap contributors, licensed under the ODbL.
 - Requests carry an identifying User-Agent, which Nominatim's usage policy asks for. Set `NOMINATIM_UA` with a real contact, such as the repo URL.
-- Results are cached so these free public services don't get hammered, and a busy server gets one retry, not a loop.
+- Results are cached so these free public services don't get hammered, a busy server gets one retry, not a loop, and the Nominatim fallback waits a second first to stay within its one-request-per-second policy.
 - Only public listing data is used. There's no scraping behind logins and no CAPTCHA workarounds.
 - When OSM is unavailable the fallback rows are marked as samples in both the UI and the API, and they never go into an export.
 

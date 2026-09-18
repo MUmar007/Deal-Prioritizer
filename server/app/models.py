@@ -22,6 +22,7 @@ class BuyBoxRun(Base):
     source_status: Mapped[str] = mapped_column(
         String(20), default="live", server_default="live"
     )
+    source_detail: Mapped[str | None] = mapped_column(String(300))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

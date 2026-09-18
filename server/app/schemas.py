@@ -60,5 +60,6 @@ class RunOut(BaseModel):
     headcount_min: int
     headcount_max: int
     source_status: SourceStatus
+    source_detail: str | None
     created_at: datetime
     targets: list[TargetOut]

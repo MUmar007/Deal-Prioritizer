@@ -31,6 +31,13 @@ services:
       HTTP_TIMEOUT: "15"
       NOMINATIM_UA: DealPrioritizer/1.0 (+https://github.com/MUmar007/Deal-Prioritizer)
       CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
+      GEOCODE_URL: https://nominatim.openstreetmap.org/search
+      OVERPASS_URL: https://overpass-api.de/api/interpreter
+      OVERPASS_RETRY_STATUS: "[429,502,503,504]"
+      OVERPASS_RETRY_SECONDS: "2"
+      NOMINATIM_PAUSE_SECONDS: "1"
+      NOMINATIM_MAX_RESULTS: "40"
+      CACHE_VERSION: v2
     depends_on:
       db:
         condition: service_healthy

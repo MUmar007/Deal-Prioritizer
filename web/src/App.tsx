@@ -178,6 +178,7 @@ export default function App() {
                 <strong>sample companies, not real businesses</strong>. They are never exported. Run the
                 search again in a minute.
               </p>
+              {run.source_detail && <p className="mt-2 text-xs text-amber-100/70">Details: {run.source_detail}</p>}
             </div>
           )}
 

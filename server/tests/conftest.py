@@ -14,6 +14,13 @@ for key, value in {
     "HTTP_TIMEOUT": "15",
     "NOMINATIM_UA": "DealPrioritizer/1.0 (tests)",
     "CORS_ORIGINS": '["http://localhost:3000"]',
+    "GEOCODE_URL": "https://nominatim.openstreetmap.org/search",
+    "OVERPASS_URL": "https://overpass-api.de/api/interpreter",
+    "OVERPASS_RETRY_STATUS": "[429,502,503,504]",
+    "OVERPASS_RETRY_SECONDS": "0",
+    "NOMINATIM_PAUSE_SECONDS": "0",
+    "NOMINATIM_MAX_RESULTS": "40",
+    "CACHE_VERSION": "test",
 }.items():
     os.environ.setdefault(key, value)
 

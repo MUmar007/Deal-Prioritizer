@@ -1,6 +1,9 @@
+from urllib.parse import urlparse
+
 import httpx
 import pytest
 
+from app.config import settings
 from app.services import cache
 from app.services import source_fetcher as sf
 
@@ -24,24 +27,33 @@ def known_market(monkeypatch):
     monkeypatch.setattr(sf, "resolve_market", fake_resolve)
 
 
-def overpass_returning(monkeypatch, *responses: httpx.Response) -> list[int]:
-    """Fake Overpass that returns these responses in order.
+def fake_network(monkeypatch, overpass=(), nominatim=()) -> dict[str, int]:
+    """Fake Overpass and Nominatim that answer from these queues in order.
 
-    The returned list gets one entry per request, so tests can count calls.
+    Queue items are responses, or exceptions to raise (e.g. a ConnectError).
+    Returns a dict counting requests per service.
     """
-    calls: list[int] = []
-    queue = list(responses)
+    overpass_host = urlparse(settings.overpass_url).hostname
+    queues = {"overpass": list(overpass), "nominatim": list(nominatim)}
+    calls = {"overpass": 0, "nominatim": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(1)
-        return queue.pop(0)
+        service = "overpass" if request.url.host == overpass_host else "nominatim"
+        calls[service] += 1
+        item = queues[service].pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
 
     def client(**kwargs) -> httpx.AsyncClient:
         return REAL_HTTPX_CLIENT(transport=httpx.MockTransport(handler), **kwargs)
 
     monkeypatch.setattr(sf.httpx, "AsyncClient", client)
-    monkeypatch.setattr(sf, "OVERPASS_RETRY_SECONDS", 0)
     return calls
+
+
+def unreachable() -> httpx.ConnectError:
+    return httpx.ConnectError("All connection attempts failed")
 
 
 PLUMBER = {
@@ -54,6 +66,21 @@ PLUMBER = {
         "start_date": "2006-04",
         "opening_hours": "Mo-Fr 08:00-17:00",
     }
+}
+
+NOMINATIM_ROW = {
+    "name": "Time Plumbing Heating and Electric",
+    "address": {
+        "house_number": "1150",
+        "road": "West 8th Avenue",
+        "city": "Denver",
+        "state": "Colorado",
+        "ISO3166-2-lvl4": "US-CO",
+    },
+    "extratags": {
+        "phone": "+1 303 555 0142",
+        "opening_hours": "Mo-Fr 07:00-17:00",
+    },
 }
 
 
@@ -101,48 +128,97 @@ def test_samples_are_labeled_and_fictional():
 
 
 async def test_live_results_are_cached(monkeypatch, known_market):
-    calls = overpass_returning(
-        monkeypatch, httpx.Response(200, json={"elements": [PLUMBER]})
+    calls = fake_network(
+        monkeypatch, overpass=[httpx.Response(200, json={"elements": [PLUMBER]})]
     )
     first = await sf.pull_from_osm("Plumbing", "Denver, CO", 10)
     second = await sf.pull_from_osm("Plumbing", "Denver, CO", 10)
     assert first.source_status == second.source_status == "live"
+    assert first.source_detail is None
     assert [c.legal_name for c in second.candidates] == ["Heating & Plumbing Engineers"]
-    assert len(calls) == 1
+    assert calls == {"overpass": 1, "nominatim": 0}
 
 
 async def test_busy_overpass_is_retried_once(monkeypatch, known_market):
-    calls = overpass_returning(
+    calls = fake_network(
         monkeypatch,
-        httpx.Response(429),
-        httpx.Response(200, json={"elements": [PLUMBER]}),
+        overpass=[
+            httpx.Response(429),
+            httpx.Response(200, json={"elements": [PLUMBER]}),
+        ],
     )
     result = await sf.pull_from_osm("Plumbing", "Denver, CO", 10)
     assert result.source_status == "live"
-    assert len(calls) == 2
+    assert calls == {"overpass": 2, "nominatim": 0}
 
 
-async def test_unavailable_overpass_returns_uncached_samples(monkeypatch, known_market):
-    calls = overpass_returning(
+async def test_unreachable_overpass_falls_back_to_nominatim(monkeypatch, known_market):
+    calls = fake_network(
         monkeypatch,
-        httpx.Response(504),
-        httpx.Response(504),
-        httpx.Response(504),
-        httpx.Response(504),
+        overpass=[unreachable()],
+        nominatim=[httpx.Response(200, json=[NOMINATIM_ROW])],
+    )
+    result = await sf.pull_from_osm("Plumbing", "Denver, CO", 10)
+
+    assert result.source_status == "live"
+    assert "All connection attempts failed" in result.source_detail
+    assert "used Nominatim search instead" in result.source_detail
+    [company] = result.candidates
+    assert company.origin == "osm"
+    assert company.street_line == "1150 West 8th Avenue"
+    assert company.region == "CO"
+    assert company.main_phone == "+1 303 555 0142"
+    assert company.has_opening_hours is True
+
+    await sf.pull_from_osm("Plumbing", "Denver, CO", 10)
+    assert calls == {"overpass": 1, "nominatim": 1}
+
+
+async def test_both_sources_down_returns_uncached_samples(monkeypatch, known_market):
+    calls = fake_network(
+        monkeypatch,
+        overpass=[unreachable(), unreachable()],
+        nominatim=[httpx.Response(503), httpx.Response(503)],
     )
     first = await sf.pull_from_osm("Plumbing", "Denver, CO", 10)
     assert first.source_status == "unavailable"
     assert {c.origin for c in first.candidates} == {"sample"}
+    assert "Nominatim: HTTP 503" in first.source_detail
 
     await sf.pull_from_osm("Plumbing", "Denver, CO", 10)
-    assert len(calls) == 4
+    assert calls == {"overpass": 2, "nominatim": 2}
+
+
+async def test_filters_nominatim_cannot_express_skip_the_fallback(
+    monkeypatch, known_market
+):
+    calls = fake_network(monkeypatch, overpass=[unreachable()])
+    result = await sf.pull_from_osm("Cleaning", "Denver, CO", 10)
+    assert result.source_status == "unavailable"
+    assert calls == {"overpass": 1, "nominatim": 0}
 
 
 async def test_no_results_are_not_padded(monkeypatch, known_market):
-    overpass_returning(monkeypatch, httpx.Response(200, json={"elements": []}))
+    calls = fake_network(
+        monkeypatch, overpass=[httpx.Response(200, json={"elements": []})]
+    )
     result = await sf.pull_from_osm("Plumbing", "Denver, CO", 10)
     assert result.source_status == "no_results"
     assert result.candidates == []
+    assert calls["nominatim"] == 0
+
+
+def test_nominatim_tag():
+    assert sf.nominatim_tag("[craft=plumber]") == "craft=plumber"
+    assert sf.nominatim_tag('[shop=trade]["name"~Clean,i]') is None
+
+
+def test_tags_from_nominatim_matches_overpass_shape():
+    tags = sf.tags_from_nominatim(NOMINATIM_ROW)
+    candidate = sf.candidate_from_tags(tags, "Denver, CO")
+    assert candidate.legal_name == "Time Plumbing Heating and Electric"
+    assert candidate.locality == "Denver"
+    assert candidate.region == "CO"
 
 
 async def test_unknown_market_raises(monkeypatch):

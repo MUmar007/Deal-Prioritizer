@@ -35,3 +35,14 @@ def test_missing_setting_fails_loudly(monkeypatch):
 def test_empty_redis_url_means_memory_cache(monkeypatch):
     monkeypatch.setenv("REDIS_URL", "")
     assert Settings(_env_file=None).redis_url is None
+
+
+def test_nominatim_result_cap_is_enforced(monkeypatch):
+    monkeypatch.setenv("NOMINATIM_MAX_RESULTS", "100")
+    with pytest.raises(ValidationError, match="nominatim_max_results"):
+        Settings(_env_file=None)
+
+
+def test_retry_statuses_parse_from_json(monkeypatch):
+    monkeypatch.setenv("OVERPASS_RETRY_STATUS", "[429, 504]")
+    assert Settings(_env_file=None).overpass_retry_status == {429, 504}

@@ -28,6 +28,7 @@ export type PipelineRun = {
   headcount_min: number;
   headcount_max: number;
   source_status: SourceStatus;
+  source_detail: string | null;
   created_at: string;
   targets: TargetRow[];
 };

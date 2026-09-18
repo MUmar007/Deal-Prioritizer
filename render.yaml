@@ -31,6 +31,20 @@ services:
         value: "3600"
       - key: HTTP_TIMEOUT
         value: "15"
+      - key: GEOCODE_URL
+        value: https://nominatim.openstreetmap.org/search
+      - key: OVERPASS_URL
+        value: https://overpass-api.de/api/interpreter
+      - key: OVERPASS_RETRY_STATUS
+        value: "[429,502,503,504]"
+      - key: OVERPASS_RETRY_SECONDS
+        value: "2"
+      - key: NOMINATIM_PAUSE_SECONDS
+        value: "1"
+      - key: NOMINATIM_MAX_RESULTS
+        value: "40"
+      - key: CACHE_VERSION
+        value: v2
 
   - type: web
     name: deal-prioritizer-web
