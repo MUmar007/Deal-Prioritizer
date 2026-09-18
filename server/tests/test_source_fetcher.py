@@ -170,8 +170,20 @@ async def test_unreachable_overpass_falls_back_to_nominatim(monkeypatch, known_m
     assert company.main_phone == "+1 303 555 0142"
     assert company.has_opening_hours is True
 
-    await sf.pull_from_osm("Plumbing", "Denver, CO", 10)
+    cached = await sf.pull_from_osm("Plumbing", "Denver, CO", 10)
+    assert cached.source_detail == result.source_detail
     assert calls == {"overpass": 1, "nominatim": 1}
+
+
+async def test_old_cache_shape_is_treated_as_a_miss(monkeypatch, known_market):
+    ck = f"osm:{settings.cache_version}:plumbing:denver, co:10"
+    await cache.put_cached(ck, [{"legal_name": "Stale Row"}], 60)
+    calls = fake_network(
+        monkeypatch, overpass=[httpx.Response(200, json={"elements": [PLUMBER]})]
+    )
+    result = await sf.pull_from_osm("Plumbing", "Denver, CO", 10)
+    assert [c.legal_name for c in result.candidates] == ["Heating & Plumbing Engineers"]
+    assert calls["overpass"] == 1
 
 
 async def test_both_sources_down_returns_uncached_samples(monkeypatch, known_market):

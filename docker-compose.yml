@@ -37,7 +37,7 @@ services:
       OVERPASS_RETRY_SECONDS: "2"
       NOMINATIM_PAUSE_SECONDS: "1"
       NOMINATIM_MAX_RESULTS: "40"
-      CACHE_VERSION: v2
+      CACHE_VERSION: v3
     depends_on:
       db:
         condition: service_healthy

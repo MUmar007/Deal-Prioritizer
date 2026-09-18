@@ -44,7 +44,7 @@ services:
       - key: NOMINATIM_MAX_RESULTS
         value: "40"
       - key: CACHE_VERSION
-        value: v2
+        value: v3
 
   - type: web
     name: deal-prioritizer-web

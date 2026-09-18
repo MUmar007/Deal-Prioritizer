@@ -2,6 +2,10 @@
 
 A small tool for acquisition search teams. Give it a trade and a city, and it tells you which local businesses are worth enriching or calling first, before you spend list credits on the rest.
 
+**Live:** [app](https://deal-prioritizer-web.onrender.com) · [API docs](https://deal-prioritizer-api.onrender.com/docs) · [API health](https://deal-prioritizer-api.onrender.com/healthz)
+
+It runs on Render's free plan, so if nobody has used it for a while the first request takes about a minute while the API wakes up. Try **Auto / Chicago, IL** or **Dental / Seattle, WA**.
+
 ## Why
 
 Search funds and small PE shops pull long lead lists out of tools like SaaSquatch, then pay for every row in enrichment credits and calling time. That includes franchise locations nobody is ever going to buy. I wanted something that sits before that step: pick a vertical and a market, get back local operators ranked by how acquirable they look (independent, established, reachable), with chains filtered out and a short reason next to every score. The result exports as a CSV you can drop into a CRM or dialer.
@@ -40,9 +44,10 @@ OSM doesn't publish staff counts, so the headcount band is saved with each run b
 
 ## Demo and dataset
 
-- [`demo/api_walkthrough.ipynb`](demo/api_walkthrough.ipynb) walks through the API with real output: a search, the ranked shortlist, chain filtering, CSV export and validation errors.
+- [`demo/api_walkthrough_live.ipynb`](demo/api_walkthrough_live.ipynb) walks through the deployed API on Render with real output: a search, the ranked shortlist, chain filtering, CSV export and validation errors. Nothing to install but `httpx`.
+- [`demo/api_walkthrough_local.ipynb`](demo/api_walkthrough_local.ipynb) is the same walkthrough against the Docker stack on your machine.
 - [`data/auto-chicago-il.csv`](data/auto-chicago-il.csv) is a real export of 38 Chicago auto repair shops, 7 of which got rejected as chains. More in [`data/README.md`](data/README.md).
-- With the stack running, Swagger is at http://localhost:8000/docs.
+- Swagger: [live](https://deal-prioritizer-api.onrender.com/docs), or http://localhost:8000/docs with the stack running.
 
 ## Layout
 
@@ -64,7 +69,7 @@ deal-prioritizer/
   web/                 Vite + React UI
     Dockerfile         Builds the UI, serves it with nginx
     nginx.conf         Static files + /v1 proxy to the API
-  demo/                Jupyter walkthrough
+  demo/                Jupyter walkthroughs (live and local)
   data/                Sample dataset (OpenStreetMap, ODbL)
 ```
 
@@ -238,7 +243,7 @@ Changing any of these on Render (for example switching `OVERPASS_URL` to another
 | `OVERPASS_RETRY_SECONDS` | `2` | Wait before that retry |
 | `NOMINATIM_PAUSE_SECONDS` | `1` | Wait before the fallback search (Nominatim allows 1 request/s) |
 | `NOMINATIM_MAX_RESULTS` | `40` | Fallback result cap, 1–40 (Nominatim's own maximum is 40) |
-| `CACHE_VERSION` | `v2` | Part of every discovery cache key; bump it to drop cached results |
+| `CACHE_VERSION` | `v3` | Part of every discovery cache key; bump it to drop cached results |
 
 The container's port is separate: it listens on `PORT` if set (Render sets it), otherwise 8000.
 

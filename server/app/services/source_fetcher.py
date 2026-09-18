@@ -267,9 +267,12 @@ async def pull_from_osm(vertical: str, market: str, cap: int) -> DiscoveryResult
     """
     ck = f"osm:{settings.cache_version}:{vertical.lower()}:{market.lower()}:{cap}"
     cached = await get_cached(ck)
-    if cached is not None:
-        rows = [CompanyCandidate(**row) for row in cached]
-        return DiscoveryResult(rows, "live" if rows else "no_results")
+    # Anything that isn't this dict shape is from an older CACHE_VERSION; treat
+    # it as a miss rather than crash if the env var wasn't bumped yet.
+    if isinstance(cached, dict):
+        rows = [CompanyCandidate(**row) for row in cached["candidates"]]
+        status = "live" if rows else "no_results"
+        return DiscoveryResult(rows, status, cached.get("detail"))
 
     coords = await resolve_market(market)
     if coords is None:
@@ -309,5 +312,6 @@ async def pull_from_osm(vertical: str, market: str, cap: int) -> DiscoveryResult
         found.append(candidate)
 
     found = found[:cap]
-    await put_cached(ck, [asdict(c) for c in found], settings.cache_seconds)
+    payload = {"candidates": [asdict(c) for c in found], "detail": detail or None}
+    await put_cached(ck, payload, settings.cache_seconds)
     return DiscoveryResult(found, "live" if found else "no_results", detail or None)
