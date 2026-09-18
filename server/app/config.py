@@ -1,31 +1,50 @@
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Every setting can be overridden with an env var or a .env file."""
+    """All settings come from env vars (or server/.env locally); nothing is defaulted.
+
+    See server/.env.example for every key. docker-compose.yml and render.yaml
+    set them for Docker and Render.
+    """
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "postgresql+asyncpg://deal:deal@localhost:5433/dealprioritizer"
-    redis_url: str | None = None
-    cache_seconds: int = 3600
-    http_timeout: float = 15.0
-    nominatim_ua: str = "DealPrioritizer/1.0"
-    cors_origins: list[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:4173",
-    ]
+    database_url: str
+    redis_url: str | None
+    cache_seconds: int
+    http_timeout: float
+    nominatim_ua: str
+    cors_origins: list[str]
+
+    @field_validator("redis_url", mode="before")
+    @classmethod
+    def blank_redis_means_memory_cache(cls, value: str | None) -> str | None:
+        """Treat REDIS_URL= (empty) as "no Redis", so the in-memory cache is used."""
+        return value or None
 
     @field_validator("database_url")
     @classmethod
     def use_asyncpg_driver(cls, value: str) -> str:
-        """Add the asyncpg driver to plain postgres:// URLs (Render hands those out)."""
+        """Accept the plain postgres:// URLs that Neon and Render hand out.
+
+        Adds the asyncpg driver, renames libpq's sslmode to asyncpg's ssl, and
+        drops channel_binding, which asyncpg doesn't know about.
+        """
         for scheme in ("postgres://", "postgresql://"):
             if value.startswith(scheme):
-                return "postgresql+asyncpg://" + value.removeprefix(scheme)
-        return value
+                value = "postgresql+asyncpg://" + value.removeprefix(scheme)
+                break
+        parts = urlsplit(value)
+        query = [
+            ("ssl" if key == "sslmode" else key, val)
+            for key, val in parse_qsl(parts.query)
+            if key != "channel_binding"
+        ]
+        return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 settings = Settings()

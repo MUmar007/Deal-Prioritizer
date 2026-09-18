@@ -118,7 +118,7 @@ psql postgres -c "CREATE USER deal WITH PASSWORD 'deal' CREATEDB;"
 psql postgres -c "CREATE DATABASE dealprioritizer OWNER deal;"
 ```
 
-Then set `DATABASE_URL=postgresql+asyncpg://deal:deal@localhost:5432/dealprioritizer` in `server/.env`. Drop `REDIS_URL` unless you're running Redis yourself; without it the API just caches in memory.
+Then set `DATABASE_URL=postgresql+asyncpg://deal:deal@localhost:5432/dealprioritizer` in `server/.env`. Set `REDIS_URL=` (empty) unless you're running Redis yourself; the API then caches in memory.
 
 ### 2. API
 
@@ -191,7 +191,7 @@ The UI is a static build on Render's CDN. The API is a long-running container ra
 **Deploying**
 
 1. Push the repo to GitHub.
-2. In Render, go to **New → Blueprint** and pick the repo. Render reads `render.yaml` and asks you for `NOMINATIM_UA` (app name plus a contact email).
+2. In Render, go to **New → Blueprint** and pick the repo. Render reads `render.yaml` and asks you for `NOMINATIM_UA`, e.g. `DealPrioritizer/1.0 (+https://github.com/<you>/<repo>)`.
 3. Render creates the database and Key Value, builds the API image and the static UI, and wires `DATABASE_URL` and `REDIS_URL` into the API.
 4. The API runs Alembic migrations each time it starts, then listens on the port Render assigns.
 5. After that, every push to the default branch redeploys.
@@ -215,17 +215,23 @@ To run it somewhere else, `docker-compose.yml` brings up the same four pieces (n
 
 ## Configuration
 
-Set these in `server/.env` or the environment.
+All API settings come from the environment and none have defaults in code, so the API won't start until every one is set (the error lists whatever is missing).
 
-| Variable | Default | Purpose |
+- Local: copy `server/.env.example` to `server/.env`. It has working values for the Docker database and cache.
+- Docker: `docker-compose.yml` sets them for the `api` service.
+- Render: `render.yaml` sets them, except `NOMINATIM_UA`, which you enter when creating the blueprint.
+- Tests: `tests/conftest.py` sets its own, pointing at the test database.
+
+| Variable | Example | Purpose |
 |----------|---------|---------|
-| `DATABASE_URL` | `postgresql+asyncpg://deal:deal@localhost:5433/dealprioritizer` | PostgreSQL connection |
-| `REDIS_URL` | unset | Redis cache; in-process memory if unset |
+| `DATABASE_URL` | `postgresql+asyncpg://deal:deal@localhost:5433/dealprioritizer` | PostgreSQL connection. Plain `postgres://` URLs from Render or Neon work too |
+| `REDIS_URL` | `redis://localhost:6380/0` | Redis cache. Leave empty to cache in memory |
 | `CACHE_SECONDS` | `3600` | TTL for geocoding and discovery results |
 | `HTTP_TIMEOUT` | `15` | Geocoder timeout, seconds |
-| `NOMINATIM_UA` | `DealPrioritizer/1.0` | User-Agent for OSM services; put your contact details in it |
-| `CORS_ORIGINS` | localhost:3000, 127.0.0.1:3000/4173 | JSON list of allowed browser origins |
-| `PORT` | `8000` | Port the API container listens on (Render sets this) |
+| `NOMINATIM_UA` | `DealPrioritizer/1.0 (+https://github.com/<you>/<repo>)` | User-Agent for OSM services. Use a real contact; Overpass rejects `example.com` |
+| `CORS_ORIGINS` | `["http://localhost:3000"]` | JSON list of browser origins allowed to call the API |
+
+The container's port is separate: it listens on `PORT` if set (Render sets it), otherwise 8000.
 
 The UI has one build-time variable, `VITE_API_URL`, for when it's hosted separately from the API. Leave it unset locally and in Docker, where `/v1` is proxied.
 
@@ -283,7 +289,7 @@ Bad input or an unknown market comes back as a 422 with FastAPI's `detail`. If t
 ## Data and ethics
 
 - Listings come from [OpenStreetMap](https://www.openstreetmap.org/copyright) through Nominatim and Overpass. © OpenStreetMap contributors, licensed under the ODbL.
-- Requests carry an identifying User-Agent, which Nominatim's usage policy asks for. Set `NOMINATIM_UA` with your own contact details.
+- Requests carry an identifying User-Agent, which Nominatim's usage policy asks for. Set `NOMINATIM_UA` with a real contact, such as the repo URL.
 - Results are cached so these free public services don't get hammered, and a busy server gets one retry, not a loop.
 - Only public listing data is used. There's no scraping behind logins and no CAPTCHA workarounds.
 - When OSM is unavailable the fallback rows are marked as samples in both the UI and the API, and they never go into an export.

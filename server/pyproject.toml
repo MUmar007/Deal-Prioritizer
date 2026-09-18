@@ -27,6 +27,8 @@ convention = "pep257"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D"]
+# conftest has to set env vars before importing the app
+"tests/conftest.py" = ["D", "E402"]
 "alembic/*" = ["D"]
 
 [tool.ruff.lint.flake8-bugbear]

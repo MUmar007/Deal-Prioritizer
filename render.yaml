@@ -27,6 +27,10 @@ services:
         value: '["https://deal-prioritizer-web.onrender.com"]'
       - key: NOMINATIM_UA
         sync: false
+      - key: CACHE_SECONDS
+        value: "3600"
+      - key: HTTP_TIMEOUT
+        value: "15"
 
   - type: web
     name: deal-prioritizer-web

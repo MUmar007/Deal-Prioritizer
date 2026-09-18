@@ -2,6 +2,21 @@ import asyncio
 import os
 from collections.abc import AsyncIterator
 
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://deal:deal@localhost:5433/dealprioritizer_test",
+)
+
+for key, value in {
+    "DATABASE_URL": TEST_DATABASE_URL,
+    "REDIS_URL": "",
+    "CACHE_SECONDS": "3600",
+    "HTTP_TIMEOUT": "15",
+    "NOMINATIM_UA": "DealPrioritizer/1.0 (tests)",
+    "CORS_ORIGINS": '["http://localhost:3000"]',
+}.items():
+    os.environ.setdefault(key, value)
+
 import asyncpg
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -11,11 +26,6 @@ from sqlalchemy.pool import NullPool
 
 from app.db import Base, get_session
 from app.main import app
-
-TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL",
-    "postgresql+asyncpg://deal:deal@localhost:5433/dealprioritizer_test",
-)
 
 
 async def _ensure_database(url: str) -> None:
