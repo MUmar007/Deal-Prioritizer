@@ -2,7 +2,7 @@
 
 A small tool for acquisition search teams. Give it a trade and a city, and it tells you which local businesses are worth enriching or calling first, before you spend list credits on the rest.
 
-**Live:** [app](https://deal-prioritizer-web.onrender.com) · [API docs](https://deal-prioritizer-api.onrender.com/docs) · [API health](https://deal-prioritizer-api.onrender.com/healthz)
+**Live:** [app](https://deal-prioritizer-web.onrender.com) · [API docs](https://deal-prioritizer-api.onrender.com/docs) · [API health](https://deal-prioritizer-api.onrender.com/healthz) · [Colab walkthrough](https://colab.research.google.com/drive/1jEXgKrQkHY1w4SD24lsLMxugH_cLpcJB)
 
 It runs on Render's free plan, so if nobody has used it for a while the first request takes about a minute while the API wakes up. Try **Auto / Chicago, IL** or **Dental / Seattle, WA**.
 
@@ -44,8 +44,7 @@ OSM doesn't publish staff counts, so the headcount band is saved with each run b
 
 ## Demo and dataset
 
-- [`demo/api_walkthrough_live.ipynb`](demo/api_walkthrough_live.ipynb) walks through the deployed API on Render with real output: a search, the ranked shortlist, chain filtering, CSV export and validation errors. Nothing to install but `httpx`.
-- [`demo/api_walkthrough_local.ipynb`](demo/api_walkthrough_local.ipynb) is the same walkthrough against the Docker stack on your machine.
+- [Colab walkthrough](https://colab.research.google.com/drive/1jEXgKrQkHY1w4SD24lsLMxugH_cLpcJB) runs the deployed API end to end in your browser: a search, the ranked shortlist, chain filtering, CSV export and validation errors. Use **Runtime → Run all**; nothing to install.
 - [`data/auto-chicago-il.csv`](data/auto-chicago-il.csv) is a real export of 38 Chicago auto repair shops, 7 of which got rejected as chains. More in [`data/README.md`](data/README.md).
 - Swagger: [live](https://deal-prioritizer-api.onrender.com/docs), or http://localhost:8000/docs with the stack running.
 
@@ -69,7 +68,6 @@ deal-prioritizer/
   web/                 Vite + React UI
     Dockerfile         Builds the UI, serves it with nginx
     nginx.conf         Static files + /v1 proxy to the API
-  demo/                Jupyter walkthroughs (live and local)
   data/                Sample dataset (OpenStreetMap, ODbL)
 ```
 
